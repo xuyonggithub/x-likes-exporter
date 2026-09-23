@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "X Likes to Markdown",
+  "version": "0.1.0",
+  "description": "把 X(Twitter) 上点赞的推文导出并增量追加到本地 Markdown 文件",
+  "minimum_chrome_version": "111",
+  "permissions": [
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://x.com/*",
+    "https://twitter.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://x.com/*/likes*",
+        "https://twitter.com/*/likes*"
+      ],
+      "js": [
+        "src/content/app.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "X Likes to Markdown",
+    "default_popup": "src/popup/popup.html"
+  }
+}

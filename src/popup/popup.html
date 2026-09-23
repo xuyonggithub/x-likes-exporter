@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { width: 320px; margin: 0; padding: 12px; font-family: system-ui, sans-serif; font-size: 13px; color: #e7e9ea; background: #0f1419; }
+    h1 { font-size: 14px; margin: 0 0 10px; }
+    label { display: block; margin-bottom: 6px; color: #8899a6; font-size: 12px; }
+    input { width: 100%; box-sizing: border-box; background: #22282e; color: #e7e9ea; border: 1px solid #38444d; border-radius: 6px; padding: 6px 8px; }
+    button { margin-top: 10px; width: 100%; background: #1d9bf0; color: #fff; border: none; border-radius: 999px; padding: 8px; cursor: pointer; font-size: 13px; }
+    ol { margin: 12px 0 0; padding-left: 18px; color: #8899a6; font-size: 12px; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <h1>点赞导出 Markdown</h1>
+  <label for="handle">X 用户名（不带 @，留空打开自己的点赞页）</label>
+  <input id="handle" placeholder="例如 elonmusk">
+  <button id="open">打开点赞页</button>
+  <ol>
+    <li>打开后右下角会出现导出面板</li>
+    <li>先点「选择文件」挑一个 .md（之后一直往里追加，不会重复）</li>
+    <li>点「开始导出」，保持这个标签页可见直到结束</li>
+  </ol>
+  <script src="popup.js"></script>
+</body>
+</html>
