@@ -29,7 +29,7 @@
 把你在 X（Twitter）上点赞过的推文，一键导出为排版整洁的 Markdown 文件，方便存档、检索和做笔记。
 
 主要功能：
-• 增量导出：第一次选好 .md 文件，之后每次只往文件末尾追加新点赞的内容，不会重复
+• 三种保存方式：单个文件 / 按发布月份拆分 / 按大小拆分（单文件上限可设，最高 500 KB，避免文件过大打不开）
 • 三种拉取范围：全部 / 限制条数 / 按发布日期区间筛选（结束日期默认为今天）
 • 内容完整：作者、发布时间、正文全文、图片、视频链接、被引用的推文
 • 10 种界面语言：简体中文、繁體中文、English、日本語、Español、Français、Deutsch、한국어、ไทย、Русский
@@ -62,7 +62,8 @@
 Archive every tweet you liked on X (Twitter) as a clean, readable Markdown file — perfect for personal archives, search and note-taking.
 
 Key features:
-• Incremental export: pick a .md file once; afterwards only new likes are appended, never duplicated
+• Incremental export: pick a folder once; afterwards only new likes are appended, never duplicated
+• Three save modes: single file / split by publish month / split by file size (settable cap, max 500 KB, so files stay easy to open)
 • Three range modes: all / limited count / filter by tweet date range (end date defaults to today)
 • Complete content: author, timestamp, full text, images, video links and quoted tweets
 • 10 UI languages: English, 简体中文, 繁體中文, 日本語, Español, Français, Deutsch, 한국어, ไทย, Русский

@@ -22,20 +22,25 @@
   const STORE_META = 'meta';   // 文件句柄等
   const API_RE = /\/i\/api\/(graphql|1\.1|2)\//;
 
+  const PREFIX = 'x-likes';
+  const MAX_FILE_KB_LIMIT = 500; // 单文件上限的硬上限，避免编辑器打不开
+
   const state = {
     running: false,
     stopRequested: false,
     mode: 'all', // all | count | range
+    saveMode: 'single', // single | month | size
     collected: [],
     sessionIds: new Set(),
     seen: new Set(),
     maxTweets: 0,
     startDate: null, // ms，仅 range 模式
     endDate: null, // ms，仅 range 模式
+    maxSizeKb: 400, // 仅 size 模式：单文件大小上限
     intervalMs: 1200,
     maxIdleRounds: 12,
-    fileHandle: null,
-    fileName: '',
+    dirHandle: null,
+    dirName: '',
   };
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -329,24 +334,24 @@
     return lines.join('\n');
   }
 
+  const batchHead = (n) => tr('mdBatch', { d: fmtDate(new Date()), n });
+
   function batchToMarkdown(tweets) {
-    return tr('mdBatch', { d: fmtDate(new Date()), n: tweets.length }) + tweets.map(tweetToMarkdown).join('');
+    return batchHead(tweets.length) + tweets.map(tweetToMarkdown).join('');
   }
 
   /* ---------------------------------------------------------------- 写文件 */
 
-  async function pickFile() {
-    if (typeof window.showSaveFilePicker !== 'function') {
+  /** 选保存文件夹：所有模式都写在这个文件夹里（x-likes.md / x-likes-2025-05.md / x-likes-001.md…） */
+  async function pickFolder() {
+    if (typeof window.showDirectoryPicker !== 'function') {
       throw new Error(tr('errNoFsa'));
     }
-    const handle = await window.showSaveFilePicker({
-      suggestedName: 'x-likes.md',
-      types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown'] } }],
-    });
-    await metaSet('fileHandle', handle);
-    await metaSet('fileName', handle.name);
-    state.fileHandle = handle;
-    state.fileName = handle.name;
+    const handle = await window.showDirectoryPicker({ id: 'x-likes-exporter', mode: 'readwrite' });
+    await metaSet('dirHandle', handle);
+    await metaSet('dirName', handle.name);
+    state.dirHandle = handle;
+    state.dirName = handle.name;
     renderFile();
     return handle;
   }
@@ -357,27 +362,60 @@
     return (await handle.requestPermission(opts)) === 'granted';
   }
 
-  async function appendToFile(text) {
-    const handle = state.fileHandle || (await metaGet('fileHandle'));
-    if (!handle) throw new Error(tr('errNoFile'));
-    state.fileHandle = handle;
-    if (!(await ensureWritePermission(handle))) throw new Error(tr('errNoPermission'));
+  async function ensureDir() {
+    const dir = state.dirHandle || (await metaGet('dirHandle'));
+    if (!dir) throw new Error(tr('errNoFile'));
+    state.dirHandle = dir;
+    if (!(await ensureWritePermission(dir))) throw new Error(tr('errNoPermission'));
+    return dir;
+  }
 
+  const byteLen = (s) => new Blob([s]).size;
+
+  /** 打开（不存在则创建）文件夹里的文件，返回 { handle, size } */
+  async function openFile(dir, name) {
+    const handle = await dir.getFileHandle(name, { create: true });
     const file = await handle.getFile();
+    return { handle, size: file.size, file };
+  }
+
+  /** 追加写入：空文件先写标题；已存在则 seek 到末尾（必要时补换行） */
+  async function appendTo(dir, name, text) {
+    const { handle, size, file } = await openFile(dir, name);
     const writable = await handle.createWritable({ keepExistingData: true });
     try {
-      if (file.size === 0) {
+      if (size === 0) {
         await writable.write(tr('mdTitle'));
       } else {
-        await writable.seek(file.size);
-        // 上一次写入若未以换行结尾，补一个
-        const tail = await file.slice(Math.max(0, file.size - 2)).text();
+        await writable.seek(size);
+        const tail = await file.slice(Math.max(0, size - 2)).text();
         if (tail && !/\n\s*$/.test(tail)) await writable.write('\n');
       }
       await writable.write(text);
     } finally {
       await writable.close();
     }
+  }
+
+  /** 按月分文件时的文件名（用推文发布时间，不是点赞时间） */
+  function monthFileName(tweet) {
+    if (!tweet.createdAt) return `${PREFIX}-unknown.md`;
+    const d = new Date(tweet.createdAt);
+    return `${PREFIX}-${d.getFullYear()}-${pad(d.getMonth() + 1)}.md`;
+  }
+
+  function partFileName(index) {
+    return `${PREFIX}-${String(index).padStart(3, '0')}.md`;
+  }
+
+  /** 找第一个还没写满的分片文件 */
+  async function findWritablePart(dir, limitBytes) {
+    for (let i = 1; i <= 999; i++) {
+      const name = partFileName(i);
+      const { size } = await openFile(dir, name);
+      if (size < limitBytes) return { name, size, index: i };
+    }
+    return { name: partFileName(999), size: 0, index: 999 };
   }
 
   function downloadFallback(text) {
@@ -408,28 +446,90 @@
     return [...map.values()].sort((a, b) => b.createdAt - a.createdAt);
   }
 
+  /**
+   * 写入：按 saveMode 决定落到哪些文件
+   * - single: 全部进 x-likes.md
+   * - month : 按推文发布月份拆成 x-likes-YYYY-MM.md
+   * - size  : 顺序填 x-likes-001.md…，单个文件不超过 maxSizeKb
+   */
   async function flush({ auto = false } = {}) {
     const pending = pendingTweets();
     if (!pending.length) {
       setStatus(auto ? 'statusNoNew' : 'statusNoNewManual');
       return 0;
     }
-    const md = batchToMarkdown(pending);
-    try {
-      await appendToFile(md);
-    } catch (e) {
-      if (typeof window.showSaveFilePicker !== 'function') {
-        downloadFallback(tr('mdTitle') + md);
-        setStatus('statusDownloaded');
-      } else {
-        throw e;
-      }
+
+    if (typeof window.showDirectoryPicker !== 'function') {
+      // 不支持 FSA：整包下载一个文件（此时不拆分）
+      downloadFallback(tr('mdTitle') + batchToMarkdown(pending));
+      setStatus('statusDownloaded');
+      await seenPut(pending.map((t) => t.id));
+      pending.forEach((t) => state.seen.add(t.id));
+      renderCount();
+      return pending.length;
     }
+
+    const dir = await ensureDir();
+    const limitBytes = Math.min(state.maxSizeKb, MAX_FILE_KB_LIMIT) * 1024;
+    const used = [];
+    let written = 0;
+
+    if (state.saveMode === 'month') {
+      const byMonth = new Map();
+      for (const t of pending) {
+        const name = monthFileName(t);
+        if (!byMonth.has(name)) byMonth.set(name, []);
+        byMonth.get(name).push(t);
+      }
+      for (const [name, list] of byMonth) {
+        await appendTo(dir, name, batchToMarkdown(list));
+        used.push(name);
+        written += list.length;
+      }
+    } else if (state.saveMode === 'size') {
+      let part = await findWritablePart(dir, limitBytes);
+      let acc = '';
+      let accBytes = 0;
+      let batch = [];
+      const flushAcc = async () => {
+        if (!batch.length) return;
+        const text = batchHead(batch.length) + acc;
+        await appendTo(dir, part.name, text);
+        if (!used.includes(part.name)) used.push(part.name);
+        written += batch.length;
+        batch = [];
+        acc = '';
+        accBytes = 0;
+      };
+      for (const t of pending) {
+        const block = tweetToMarkdown(t);
+        const blockBytes = byteLen(block);
+        // 超出上限就先落盘当前分片，再开下一个
+        if (batch.length && part.size + accBytes + blockBytes + 64 > limitBytes) {
+          await flushAcc();
+          part = await findWritablePart(dir, limitBytes);
+        }
+        acc += block;
+        accBytes += blockBytes;
+        batch.push(t);
+      }
+      await flushAcc();
+    } else {
+      const name = `${PREFIX}.md`;
+      await appendTo(dir, name, batchToMarkdown(pending));
+      used.push(name);
+      written = pending.length;
+    }
+
     await seenPut(pending.map((t) => t.id));
     pending.forEach((t) => state.seen.add(t.id));
-    setStatus('statusWrote', { n: pending.length, f: state.fileName || '' });
+    setStatus(used.length > 1 ? 'statusWroteMulti' : 'statusWrote', {
+      n: written,
+      c: used.length,
+      f: used.join('、') || '',
+    });
     renderCount();
-    return pending.length;
+    return written;
   }
 
   /* ---------------------------------------------------------------- 导出流程 */
@@ -499,10 +599,10 @@
       toggleButtons(false);
       renderCount();
       try {
-        if (state.fileHandle || (await metaGet('fileHandle'))) {
+        if (state.dirHandle || (await metaGet('dirHandle'))) {
           await flush({ auto: true });
         } else {
-          setStatus('statusNeedFile', { n: state.collected.length });
+          setStatus('statusNoFolder');
         }
       } catch (e) {
         setStatus('statusWriteFail', { e: errMsg(e) });
@@ -536,9 +636,10 @@
   .count{margin-top:4px;color:#8899a6;font-size:12px}
   .hint{color:#6b7782;font-size:11px}
   .collapse .bd{display:none}
-  .hidden{display:none}
+  .hidden{display:none !important}
   .radio{display:inline-flex;align-items:center;gap:4px;cursor:pointer;color:#e7e9ea}
   .radio input{accent-color:#1d9bf0;margin:0}
+  .row-inline{display:inline-flex;align-items:center;gap:4px}
   input[type=date]{background:#22282e;color:#e7e9ea;border:1px solid #38444d;border-radius:6px;padding:4px 6px;color-scheme:dark}
   select{background:#16202a;color:#e7e9ea;border:1px solid #38444d;border-radius:6px;padding:3px 4px;font-size:11px;max-width:96px}
 </style>
@@ -552,6 +653,15 @@
     <div class="row">
       <button class="act" id="pick" data-i18n="pick"></button>
       <span class="file" id="file" data-i18n="notSelected"></span>
+    </div>
+    <div class="row">
+      <label class="radio"><input type="radio" name="save" value="single" checked><span data-i18n="saveSingle"></span></label>
+      <label class="radio"><input type="radio" name="save" value="month"><span data-i18n="saveMonth"></span></label>
+      <label class="radio"><input type="radio" name="save" value="size"><span data-i18n="saveSize"></span></label>
+      <span class="row-inline hidden" id="row-size">
+        <input id="maxsize" type="number" min="10" max="500" step="10" value="400">
+        <span class="hint">KB · <span data-i18n="maxSizeHint"></span></span>
+      </span>
     </div>
     <div class="row">
       <label class="radio"><input type="radio" name="mode" value="all" checked><span data-i18n="modeAll"></span></label>
@@ -586,6 +696,8 @@
       max: q('max'),
       rowCount: q('row-count'),
       rowRange: q('row-range'),
+      rowSize: q('row-size'),
+      maxSize: q('maxsize'),
       dateStart: q('date-start'),
       dateEnd: q('date-end'),
       lang: q('lang'),
@@ -612,6 +724,12 @@
     els.dateEnd.value = localToday();
     applyI18n();
 
+    root.querySelectorAll('input[name=save]').forEach((radio) => {
+      radio.addEventListener('change', () => {
+        els.rowSize.classList.toggle('hidden', root.querySelector('input[name=save]:checked').value !== 'size');
+      });
+    });
+
     root.querySelectorAll('input[name=mode]').forEach((radio) => {
       radio.addEventListener('change', () => {
         const mode = root.querySelector('input[name=mode]:checked').value;
@@ -626,18 +744,24 @@
     });
     els.pick.addEventListener('click', async () => {
       try {
-        await pickFile();
-        setStatus('statusPickOk', { f: state.fileName });
+        await pickFolder();
+        setStatus('statusFolderOk', { f: state.dirName });
       } catch (e) {
         setStatus('statusPickFail', { e: errMsg(e) });
       }
     });
     els.startBtn.addEventListener('click', () => {
       const mode = root.querySelector('input[name=mode]:checked').value;
+      const saveMode = root.querySelector('input[name=save]:checked').value;
       state.mode = mode;
+      state.saveMode = saveMode;
       state.startDate = null;
       state.endDate = null;
       state.maxTweets = 0;
+      const kb = parseInt(els.maxSize.value, 10);
+      state.maxSizeKb = Number.isFinite(kb) ? Math.max(10, Math.min(kb, MAX_FILE_KB_LIMIT)) : 400;
+      metaSet('saveMode', saveMode).catch(() => {});
+      metaSet('maxSizeKb', state.maxSizeKb).catch(() => {});
 
       if (mode === 'count') {
         const v = parseInt(els.max.value, 10);
@@ -670,8 +794,7 @@
     els.write.addEventListener('click', async () => {
       setStatus('statusWriting');
       try {
-        const n = await flush();
-        if (n) setStatus('statusWrote', { n, f: state.fileName || '' });
+        await flush(); // flush 内部已更新状态（写入条数 / 没有新增 / 失败）
       } catch (e) {
         setStatus('statusWriteFailShort', { e: errMsg(e) });
       }
@@ -701,7 +824,7 @@
     els.root.querySelectorAll('[data-i18n-title]').forEach((el) => {
       el.title = tr(el.getAttribute('data-i18n-title'));
     });
-    if (!state.fileName) els.file.textContent = tr('notSelected');
+    if (!state.dirName) els.file.textContent = tr('notSelected');
     renderCount();
     renderStatus();
   }
@@ -727,7 +850,7 @@
   }
 
   function renderFile() {
-    if (els.file) els.file.textContent = state.fileName || tr('notSelected');
+    if (els.file) els.file.textContent = state.dirName || tr('notSelected');
   }
 
   function toggleButtons(running) {
@@ -737,9 +860,10 @@
     els.write.disabled = running;
     els.pick.disabled = running;
     els.max.disabled = running;
+    els.maxSize.disabled = running;
     els.dateStart.disabled = running;
     els.dateEnd.disabled = running;
-    els.root.querySelectorAll('input[name=mode]').forEach((r) => (r.disabled = running));
+    els.root.querySelectorAll('input[name=mode],input[name=save]').forEach((r) => (r.disabled = running));
   }
 
   /* ---------------------------------------------------------------- 启动 */
@@ -780,12 +904,23 @@
     try {
       const keys = await seenKeys();
       keys.forEach((k) => state.seen.add(String(k)));
-      const handle = await metaGet('fileHandle');
-      if (handle) {
-        state.fileHandle = handle;
-        state.fileName = (await metaGet('fileName')) || handle.name || '';
+      const dir = await metaGet('dirHandle');
+      if (dir) {
+        state.dirHandle = dir;
+        state.dirName = (await metaGet('dirName')) || dir.name || '';
         renderFile();
-        setStatus('statusRememberFile', { f: state.fileName });
+        setStatus('statusRememberFile', { f: state.dirName });
+      }
+      const savedMode = await metaGet('saveMode');
+      if (savedMode && ['single', 'month', 'size'].includes(savedMode)) {
+        state.saveMode = savedMode;
+        els.root.querySelector(`input[name=save][value=${savedMode}]`).checked = true;
+        els.rowSize.classList.toggle('hidden', savedMode !== 'size');
+      }
+      const savedKb = await metaGet('maxSizeKb');
+      if (Number.isFinite(savedKb)) {
+        state.maxSizeKb = Math.max(10, Math.min(savedKb, MAX_FILE_KB_LIMIT));
+        els.maxSize.value = state.maxSizeKb;
       }
       renderCount();
     } catch (e) {
