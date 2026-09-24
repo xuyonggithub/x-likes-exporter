@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>popup shot</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0f1419; display: flex; align-items: center; justify-content: center; }
+  </style>
+  <script>
+    // 用真实 popup.html 渲染，只把扩展 API 打个桩
+    const STUB = `<script>window.chrome = {
+  storage: { local: { get: (k, cb) => cb({}), set: () => {} }, onChanged: { addListener: () => {} } },
+  tabs: { query: async () => [], create: async () => ({}), update: async () => ({}) },
+  scripting: { executeScript: async () => [] },
+  windows: { update: async () => ({}) },
+  runtime: {}
+};<\/script>`;
+    fetch('../src/popup/popup.html')
+      .then((r) => r.text())
+      .then((html) => {
+        const patched = html
+          .replace('<head>', `<head><base href="../src/popup/">${STUB}`)
+          .replace('<body>', '<body style="background:#0f1419;margin:48px auto 0;border-radius:10px;overflow:hidden">');
+        document.open();
+        document.write(patched);
+        document.close();
+      });
+  </script>
+</head>
+<body></body>
+</html>
