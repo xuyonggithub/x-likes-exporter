@@ -5,22 +5,44 @@
   <style>
     body { width: 320px; margin: 0; padding: 12px; font-family: system-ui, sans-serif; font-size: 13px; color: #e7e9ea; background: #0f1419; }
     h1 { font-size: 14px; margin: 0 0 10px; }
+    .hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .hd h1 { margin-bottom: 10px; }
     label { display: block; margin-bottom: 6px; color: #8899a6; font-size: 12px; }
     input { width: 100%; box-sizing: border-box; background: #22282e; color: #e7e9ea; border: 1px solid #38444d; border-radius: 6px; padding: 6px 8px; }
     button { margin-top: 10px; width: 100%; background: #1d9bf0; color: #fff; border: none; border-radius: 999px; padding: 8px; cursor: pointer; font-size: 13px; }
+    button.ghost { background: #22282e; border: 1px solid #38444d; }
     ol { margin: 12px 0 0; padding-left: 18px; color: #8899a6; font-size: 12px; line-height: 1.6; }
+    select { background: #22282e; color: #e7e9ea; border: 1px solid #38444d; border-radius: 6px; padding: 3px 4px; font-size: 11px; max-width: 96px; }
+    #already { display: none; }
+    #already p { color: #e7e9ea; line-height: 1.6; }
+    .tip { margin-top: 10px; color: #f4212e; font-size: 12px; line-height: 1.5; display: none; }
   </style>
 </head>
 <body>
-  <h1>点赞导出 Markdown</h1>
-  <label for="handle">X 用户名（不带 @，留空打开自己的点赞页）</label>
-  <input id="handle" placeholder="例如 elonmusk">
-  <button id="open">打开点赞页</button>
-  <ol>
-    <li>打开后右下角会出现导出面板</li>
-    <li>先点「选择文件」挑一个 .md（之后一直往里追加，不会重复）</li>
-    <li>点「开始导出」，保持这个标签页可见直到结束</li>
-  </ol>
+  <div id="main">
+    <div class="hd">
+      <h1 data-i18n="popupTitle"></h1>
+      <select id="lang" data-i18n-title="lang"></select>
+    </div>
+    <label for="handle" data-i18n="popupLabel"></label>
+    <input id="handle" data-i18n-ph="popupPlaceholder">
+    <button id="open" data-i18n="popupOpen"></button>
+    <div id="tip" class="tip"></div>
+    <ol>
+      <li data-i18n="popupStep1"></li>
+      <li data-i18n="popupStep2"></li>
+      <li data-i18n="popupStep3"></li>
+    </ol>
+  </div>
+  <div id="already">
+    <div class="hd">
+      <h1 data-i18n="popupTitle"></h1>
+      <select id="lang2" data-i18n-title="lang"></select>
+    </div>
+    <p data-i18n="popupAlreadyMsg"></p>
+    <button id="switch" data-i18n="popupSwitch"></button>
+  </div>
+  <script src="../i18n/i18n.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

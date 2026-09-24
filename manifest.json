@@ -6,7 +6,8 @@
   "minimum_chrome_version": "111",
   "permissions": [
     "scripting",
-    "tabs"
+    "tabs",
+    "storage"
   ],
   "host_permissions": [
     "https://x.com/*",
@@ -19,9 +20,20 @@
         "https://twitter.com/*/likes*"
       ],
       "js": [
+        "src/i18n/i18n.js",
         "src/content/app.js"
       ],
       "world": "MAIN",
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://x.com/*/likes*",
+        "https://twitter.com/*/likes*"
+      ],
+      "js": [
+        "src/content/bridge.js"
+      ],
       "run_at": "document_idle"
     }
   ],
